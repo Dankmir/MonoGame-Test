@@ -14,15 +14,35 @@ public class Game1 : Game
     private Texture2D pixel;
     private Texture2D pixelGuy;
 
+    private RenderTarget2D renderTarget;
+
+    private int windowSizeWidth = 1280;
+    private int windowSizeHeight = 720;
+
+    private const int nativeResolutionWidth = 640;
+    private const int nativeResolutionHeight = 360;
+
+    private Rectangle renderDestination;
 
     private Camera camera;
 
+    private bool isResizing;
+
+
+    bool _isFullscreen = false;
+    bool _isBorderless = false;
+    int _width = 0;
+    int _height = 0;
+    bool switchedCurrentFrame = false;
 
     public Game1()
     {
-        _graphics = new GraphicsDeviceManager(this);
-        _graphics.PreferredBackBufferWidth = 400;
-        _graphics.PreferredBackBufferHeight = 200;
+        _graphics = new(this)
+        {
+            PreferredBackBufferWidth = windowSizeWidth,
+            PreferredBackBufferHeight = windowSizeHeight
+        };
+
         _graphics.ApplyChanges();
 
         Content.RootDirectory = "Content";
@@ -31,11 +51,25 @@ public class Game1 : Game
 
     protected override void Initialize()
     {
-        // TODO: Add your initialization logic here
-
         camera = new Camera();
+        renderTarget = new RenderTarget2D(GraphicsDevice, nativeResolutionWidth, nativeResolutionHeight);
+
+        Window.AllowUserResizing = true;
+        Window.ClientSizeChanged += OnClientSizeChanged;
+        CalculateRenderDestination();
+
 
         base.Initialize();
+    }
+
+    private void OnClientSizeChanged(object sender, EventArgs e)
+    {
+        if (!isResizing && Window.ClientBounds.Width > 0 && Window.ClientBounds.Height > 0)
+        {
+            isResizing = true;
+            CalculateRenderDestination();
+            isResizing = false;
+        }
     }
 
     protected override void LoadContent()
@@ -65,15 +99,43 @@ public class Game1 : Game
         if (kState.IsKeyDown(Keys.A)) camera.Move(new Vector2(-moveSpeed, 0));
         if (kState.IsKeyDown(Keys.D)) camera.Move(new Vector2(moveSpeed, 0));
 
-        if (kState.IsKeyDown(Keys.Q)) camera.Zoom -= 0.01f;
-        if (kState.IsKeyDown(Keys.E)) camera.Zoom += 0.01f;
+        if (kState.IsKeyDown(Keys.Q)) camera.Zoom -= 1f / nativeResolutionWidth;
+        if (kState.IsKeyDown(Keys.E)) camera.Zoom += 1f / nativeResolutionHeight;
+
+        if (kState.IsKeyDown(Keys.F) && !switchedCurrentFrame)
+        {
+            switchedCurrentFrame = true;
+            ToggleFullscreen();
+        }
+
+        if (kState.IsKeyUp(Keys.F) && switchedCurrentFrame)
+        {
+            switchedCurrentFrame = false;
+        }
 
         base.Update(gameTime);
+    }
+
+    private void CalculateRenderDestination()
+    {
+        Point size = GraphicsDevice.Viewport.Bounds.Size;
+
+        float scaleX = (float)size.X / renderTarget.Width;
+        float scaleY = (float)size.Y / renderTarget.Height;
+        float scale = Math.Min(scaleX, scaleY);
+
+        renderDestination.Width = (int)(renderTarget.Width * scale);
+        renderDestination.Height = (int)(renderTarget.Height * scale);
+
+        renderDestination.X = (size.X - renderDestination.Width) / 2;
+        renderDestination.Y = (size.Y - renderDestination.Height) / 2;
     }
 
     protected override void Draw(GameTime gameTime)
     {
         GraphicsDevice.Clear(Color.CornflowerBlue);
+
+        GraphicsDevice.SetRenderTarget(renderTarget);
 
         // TODO: Add your drawing code here
         _spriteBatch.Begin(transformMatrix: camera.GetViewMatrix(GraphicsDevice), samplerState: SamplerState.PointClamp);
@@ -82,7 +144,12 @@ public class Game1 : Game
         _spriteBatch.Draw(pixelGuy, Vector2.Zero, null, Color.White, 0f, new Vector2(pixelGuy.Width / 2, pixelGuy.Height / 2), Vector2.One, SpriteEffects.None, 0f);
         // _spriteBatch.Draw(ballTexture, Vector2.Zero, null, Color.White, 0f, new Vector2(ballTexture.Width / 2, ballTexture.Height / 2), Vector2.One, SpriteEffects.None, 0f);
 
+        _spriteBatch.End();
 
+        GraphicsDevice.SetRenderTarget(null);
+
+        _spriteBatch.Begin(samplerState: SamplerState.PointClamp);
+        _spriteBatch.Draw(renderTarget, renderDestination, Color.White);
         _spriteBatch.End();
 
         base.Draw(gameTime);
@@ -162,6 +229,76 @@ public class Game1 : Game
         {
             spriteBatch.Draw(pixel, new Rectangle(startX, y, endX - startX, 1), lineColor);
         }
+    }
+
+
+
+    public void ToggleFullscreen()
+    {
+        bool oldIsFullscreen = _isFullscreen;
+
+        if (_isBorderless)
+        {
+            _isBorderless = false;
+        }
+        else
+        {
+            _isFullscreen = !_isFullscreen;
+        }
+
+        ApplyFullscreenChange(oldIsFullscreen);
+    }
+    public void ToggleBorderless()
+    {
+        bool oldIsFullscreen = _isFullscreen;
+
+        _isBorderless = !_isBorderless;
+        _isFullscreen = _isBorderless;
+
+        ApplyFullscreenChange(oldIsFullscreen);
+    }
+
+    private void ApplyFullscreenChange(bool oldIsFullscreen)
+    {
+        if (_isFullscreen)
+        {
+            if (oldIsFullscreen)
+            {
+                ApplyHardwareMode();
+            }
+            else
+            {
+                SetFullscreen();
+            }
+        }
+        else
+        {
+            UnsetFullscreen();
+        }
+    }
+    private void ApplyHardwareMode()
+    {
+        _graphics.HardwareModeSwitch = !_isBorderless;
+        _graphics.ApplyChanges();
+    }
+    private void SetFullscreen()
+    {
+        _width = Window.ClientBounds.Width;
+        _height = Window.ClientBounds.Height;
+
+        _graphics.PreferredBackBufferWidth = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode.Width;
+        _graphics.PreferredBackBufferHeight = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode.Height;
+        _graphics.HardwareModeSwitch = !_isBorderless;
+
+        _graphics.IsFullScreen = true;
+        _graphics.ApplyChanges();
+    }
+    private void UnsetFullscreen()
+    {
+        _graphics.PreferredBackBufferWidth = _width;
+        _graphics.PreferredBackBufferHeight = _height;
+        _graphics.IsFullScreen = false;
+        _graphics.ApplyChanges();
     }
 
 }
